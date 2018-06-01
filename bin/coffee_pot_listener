@@ -10,6 +10,8 @@ require 'serialport'
 require 'json'
 require 'time'
 
+require 'irb'
+
 class SmoothInputValue
   LOOKBACK_LENGTH = 5
 
@@ -47,6 +49,8 @@ class CoffeePotListener
       @interrupted = true
       puts 'Quitting ...'
     end
+
+    slack "Hello world!"
   end
 
   attr_reader :port, :baud, :cups, :brewed_at, :status, :cups_brewed
@@ -66,14 +70,16 @@ class CoffeePotListener
     json = JSON.parse(raw_text)
     debug json
     update_state(json['coffee_pot'])
+  rescue JSON::ParserError => e
+    puts "Problem parsing JSON ..."
   end
 
   def update_state(coffee_pot)
-    current_cups = smoother.smooth(:cups, coffee_pot['cups'])
+    current_cups = smoother.smooth(:cups, coffee_pot['cups_remaining'])
 
     case status
     when UNKNOWN, BREWED
-      if !cups.nil? && current_cups < cups
+      if !cups.nil? && current_cups < cups && current_cups > 0
         brewing!(cups)
       end
       
@@ -106,17 +112,21 @@ class CoffeePotListener
   end
 
   def slack(message)
-    debug message
-    return true
-    HTTParty.post(
+    response = HTTParty.post(
       ENV['SLACK_URL'], 
       body: {
+        token:      ENV['SLACK_TOKEN'],
         channel:    ENV['SLACK_CHANNEL'], 
-        username:   ENV['SLACK_USERNAME'], 
         text:       message, 
-        icon_emoji: ":coffee:"
-      }.to_json
+        icon_emoji: ":coffee:",
+        username:   "coffee_pot"
+      },
+      headers: { 'Content-Type' => 'application/x-www-form-urlencoded' }
     )
+
+    unless response.ok?
+      raise response.parsed_response.inspect
+    end
   end
 
   attr_reader :interrupted, :smoother
