@@ -1,0 +1,110 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'bundler/setup'
+
+## SPIKE!
+
+require 'httparty'
+require 'serialport'
+require 'json'
+require 'time'
+
+class CoffeePotListener
+  UNKNOWN = 'unknown'
+  BREWING = 'brewing'
+  BREWED  = 'coffee_ready'
+
+  def initialize(port:, baud: 9600, debug: false)
+    @port = port
+    @baud = baud
+    @debug = debug
+    
+    @status = UNKNOWN
+    @interrupted = false
+
+    trap('INT') do
+      @interrupted = true
+      puts 'Quitting ...'
+    end
+  end
+
+  attr_reader :port, :baud, :cups, :brewed_at, :status, :cups_brewed
+
+  def listen
+    SerialPort.open(port, 'baud' => baud) do |sp|
+      while (i = sp.gets.chomp) && !interrupted do
+        debug i
+        process_response i
+      end
+    end
+  end
+
+  private
+
+  def process_response(raw_text)
+    json = JSON.parse(raw_text)
+    debug json
+    update_state(json['coffee_pot'])
+  end
+
+  def update_state(coffee_pot)
+    current_cups = coffee_pot['cups']
+
+    case status
+    when UNKNOWN, BREWED
+      if !cups.nil? && current_cups < cups
+        brewing!(cups)
+      end
+      
+      self.cups = current_cups
+    when BREWING
+      if current_cups < cups && current_cups <= 0
+        brewed!
+      end
+    end
+
+    debug "Status: #{status}"
+    debug "Cups: #{cups}"
+    debug "Cups Brewed: #{cups_brewed}"
+    debug "Brewed at: #{brewed_at}"
+  end
+
+  def brewing!(cups)
+    self.status = BREWING
+    self.cups_brewed = cups
+
+    slack "#{cups_brewed} cups of coffee are currently being brewed. Get excited!"
+  end
+
+  def brewed!
+    self.status = BREWED
+    self.brewed_at = Time.now
+    self.cups = 0
+    
+    slack "#{cups_brewed} cups of coffee are now ready for your enjoyment!"
+  end
+
+  def slack(message)
+    debug message
+    return true
+    HTTParty.post(
+      ENV['SLACK_URL'], 
+      body: {
+        channel:    ENV['SLACK_CHANNEL'], 
+        username:   ENV['SLACK_USERNAME'], 
+        text:       message, 
+        icon_emoji: ":coffee:"
+      }.to_json
+    )
+  end
+
+  attr_reader :interrupted
+  attr_writer :cups, :status, :brewed_at, :cups, :cups_brewed
+
+  def debug(output)
+    puts output if @debug
+  end
+end
+
+CoffeePotListener.new(port: ENV['PORT'], debug: !ENV['DEBUG'].nil?).listen
