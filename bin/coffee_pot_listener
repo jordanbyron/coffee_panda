@@ -10,6 +10,24 @@ require 'serialport'
 require 'json'
 require 'time'
 
+class SmoothInputValue
+  LOOKBACK_LENGTH = 5
+
+  def initialize
+    @values = Hash.new { Array.new }
+  end
+
+  def smooth(type, value)
+    values_for_type = values[type]
+    values_for_type << value
+    values_for_type.shift if values_for_type.length > LOOKBACK_LENGTH
+
+    values_for_type.inject(:+) / LOOKBACK_LENGTH.to_f
+  end
+
+  attr_reader :values
+end
+
 class CoffeePotListener
   UNKNOWN = 'unknown'
   BREWING = 'brewing'
@@ -22,6 +40,8 @@ class CoffeePotListener
     
     @status = UNKNOWN
     @interrupted = false
+
+    @smoother = SmoothInputValue.new
 
     trap('INT') do
       @interrupted = true
@@ -49,7 +69,7 @@ class CoffeePotListener
   end
 
   def update_state(coffee_pot)
-    current_cups = coffee_pot['cups']
+    current_cups = smoother.smooth(:cups, coffee_pot['cups'])
 
     case status
     when UNKNOWN, BREWED
@@ -99,7 +119,7 @@ class CoffeePotListener
     )
   end
 
-  attr_reader :interrupted
+  attr_reader :interrupted, :smoother
   attr_writer :cups, :status, :brewed_at, :cups, :cups_brewed
 
   def debug(output)
