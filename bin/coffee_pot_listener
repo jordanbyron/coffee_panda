@@ -31,6 +31,8 @@ class SmoothInputValue
 end
 
 class CoffeePotListener
+  MINIMUM_CUPS_FOR_BREWING = 4
+
   UNKNOWN = 'unknown'
   BREWING = 'brewing'
   BREWED  = 'coffee_ready'
@@ -79,7 +81,7 @@ class CoffeePotListener
 
     case status
     when UNKNOWN, BREWED
-      if !cups.nil? && current_cups < cups && current_cups > 0
+      if !cups.nil? && current_cups < cups && cups.to_i >= MINIMUM_CUPS_FOR_BREWING
         brewing!(cups)
       end
       
